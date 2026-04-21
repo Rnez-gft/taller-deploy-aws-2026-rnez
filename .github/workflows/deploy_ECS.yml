@@ -37,19 +37,32 @@ jobs:
             --task-definition $TASK_DEFINITION \
             --query taskDefinition > task-definition.json
 
-      # ✏️ Reemplazar imagen
+      # 🧹 Limpiar JSON (IMPORTANTE)
+      - name: Clean task definition
+        run: |
+          jq 'del(
+            .taskDefinitionArn,
+            .revision,
+            .status,
+            .requiresAttributes,
+            .compatibilities,
+            .registeredAt,
+            .registeredBy
+          )' task-definition.json > new-task-definition.json
+
+      # ✏️ Reemplazar imagen (SOBRE EL LIMPIO)
       - name: Update image in task definition
         run: |
           IMAGE=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:latest
           jq --arg IMAGE "$IMAGE" \
             '.containerDefinitions[0].image = $IMAGE' \
-            task-definition.json > new-task-definition.json
+            new-task-definition.json > final-task-definition.json
 
       # 🚀 Registrar nueva revisión
       - name: Register new task definition
         run: |
           aws ecs register-task-definition \
-            --cli-input-json file://new-task-definition.json
+            --cli-input-json file://final-task-definition.json
 
       # 🔄 Actualizar servicio
       - name: Update ECS service
