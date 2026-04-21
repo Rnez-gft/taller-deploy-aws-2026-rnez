@@ -1,0 +1,60 @@
+name: Deploy to ECS
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: eu-west-1
+  ACCOUNT_ID: 822414985516
+  ECR_REPOSITORY: taller-deploy-aws-2026-repository-rnez
+  ECS_CLUSTER: taller-deploy-aws-2026-cluster-rnez
+  ECS_SERVICE: taller-deploy-aws-2026-service-rnez
+  TASK_DEFINITION: taller-deploy-aws-2026-task-rnez
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 🔐 AWS OIDC
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::822414985516:role/taller-deploy-aws-2026-rol-rnez
+          aws-region: ${{ env.AWS_REGION }}
+
+      # 📝 Descargar task definition actual
+      - name: Get current task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition $TASK_DEFINITION \
+            --query taskDefinition > task-definition.json
+
+      # ✏️ Reemplazar imagen
+      - name: Update image in task definition
+        run: |
+          IMAGE=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:latest
+          jq --arg IMAGE "$IMAGE" \
+            '.containerDefinitions[0].image = $IMAGE' \
+            task-definition.json > new-task-definition.json
+
+      # 🚀 Registrar nueva revisión
+      - name: Register new task definition
+        run: |
+          aws ecs register-task-definition \
+            --cli-input-json file://new-task-definition.json
+
+      # 🔄 Actualizar servicio
+      - name: Update ECS service
+        run: |
+          aws ecs update-service \
+            --cluster $ECS_CLUSTER \
+            --service $ECS_SERVICE \
+            --force-new-deployment
