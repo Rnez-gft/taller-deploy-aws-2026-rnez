@@ -12,7 +12,7 @@ env:
   ACCOUNT_ID: 822414985516
   ECR_REPOSITORY: taller-deploy-aws-2026-repository-rnez
   ECS_CLUSTER: taller-deploy-aws-2026-cluster-rnez
-  ECS_SERVICE: taller-deploy-aws-2026-service-rnez
+  ECS_SERVICE: taller-deploy-aws-2026-task-rnez-service-e0u5ffux
   TASK_DEFINITION: taller-deploy-aws-2026-task-rnez
 
 jobs:
