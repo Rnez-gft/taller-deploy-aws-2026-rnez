@@ -1,90 +1,213 @@
-# 🚀 Orders App -- CI/CD con GitHub Actions + Docker + AWS ECR
+# 🚀 Orders App — CI/CD con GitHub Actions, Docker, AWS ECR y ECS
 
-Este proyecto utiliza GitHub Actions, Docker y Amazon ECR para
-automatizar el build, test y despliegue de una aplicación Java.
+Este proyecto implementa un pipeline CI/CD completo usando GitHub Actions, Docker, Amazon ECR y Amazon ECS para automatizar el build, test y despliegue de una aplicación Java.
 
-------------------------------------------------------------------------
+---
 
 ## 📦 Arquitectura del flujo
 
-El pipeline está dividido en dos workflows principales:
+El sistema se compone de **3 workflows principales**:
 
-### 1. 🚀 Deploy to ECR
+### 1. 🐳 Deploy a ECR
 
-📄 `.github/workflows/deploy.yml`
+* Compila la aplicación
+* Construye imagen Docker
+* Sube la imagen a Amazon ECR
 
-Se ejecuta cuando hay un push a main o manualmente.
+### 2. 🧪 CI de validación (Docker Comparison CI)
 
-### 2. 🧪 CI de validación
+* Se ejecuta en Pull Requests
+* Ejecuta tests y build
+* Genera imagen Docker multistage
+* Muestra comparación de tamaños
 
-📄 `.github/workflows/ci.yml`
+### 3. 🚀 Deploy a ECS
 
-Se ejecuta en Pull Requests hacia main.
+* Actualiza task definition
+* Reemplaza imagen en ECS
+* Despliega nueva revisión del servicio
 
-------------------------------------------------------------------------
+---
 
-## 🚀 Workflow: Deploy to ECR
+# 🚀 Workflow: Deploy to ECR
 
-Compila la app, construye imagen Docker y la sube a AWS ECR.
+📄 `.github/workflows/deploy_image.yml`
 
-### Trigger
+Se ejecuta en push a `main` o manualmente.
 
-on: push: branches: \["main"\] workflow_dispatch:
+## 🔐 Permisos
 
-### Pasos
+* AWS OIDC (sin secrets)
+* IAM Role: `taller-deploy-aws-2026-rol-<correoAbreviado>`
 
--   Checkout repo
--   Setup Java 21
--   mvn clean package -DskipTests
--   AWS OIDC login
--   Docker login ECR
--   docker build
--   tag + push a ECR
+## ⚙️ Variables
 
-------------------------------------------------------------------------
+```yaml
+AWS_REGION: eu-west-1
+ECR_REPOSITORY: taller-deploy-aws-2026-repository-<correoAbreviado>
+ACCOUNT_ID: 822414985516
+```
 
-## 🧪 Workflow: CI
+## 🧩 Pasos del workflow
 
-Se ejecuta en PRs.
+1. Checkout repository
+2. Setup Java 21
+3. Build JAR con Maven
+4. Configurar credenciales AWS (OIDC)
+5. Login en Amazon ECR
+6. Build Docker image
+7. Tag image
+8. Push a ECR
+9. Debug de imágenes
 
-### Trigger
+---
 
-on: pull_request: branches: \["main"\]
+# 🧪 Workflow: Docker Comparison CI
 
-### Pasos
+📄 `.github/workflows/build.yml`
 
--   Build Maven
--   Run tests
--   Build Docker multistage
--   Mostrar tamaños de imagen
+Se ejecuta en Pull Requests hacia `main`.
 
-------------------------------------------------------------------------
+## ⚙️ Pasos
 
-## 🐳 Dockerfile (Multistage)
+1. Checkout repo
+2. Setup Java 21
+3. Cache Maven dependencies
+4. Build aplicación (JAR)
+5. Ejecutar tests
+6. Build Docker multistage image
+7. Mostrar tamaños de imagen
+8. Resumen de imágenes
 
-### Build stage
+---
 
-FROM maven:3.9-eclipse-temurin-21 AS build WORKDIR /app COPY . . RUN mvn
-clean package -DskipTests
+# 🚀 Workflow: Deploy to ECS
 
-### Runtime stage
+📄 `.github/workflows/deploy_ECS.yml`
 
-FROM eclipse-temurin:21-jre WORKDIR /app COPY --from=build
-/app/target/\*.jar app.jar ENTRYPOINT \["java","-jar","app.jar"\]
+Se ejecuta manualmente (`workflow_dispatch`).
 
-------------------------------------------------------------------------
+## ⚙️ Variables
 
-## 🔐 Seguridad
+```yaml
+AWS_REGION: eu-west-1
+ACCOUNT_ID: 822414985516
+ECR_REPOSITORY: taller-deploy-aws-2026-repository-<correoAbreviado>
+ECS_CLUSTER: taller-deploy-aws-2026-cluster-<correoAbreviado>
+ECS_SERVICE: Modificar por el nombre del servicio en ECS
+TASK_DEFINITION: taller-deploy-aws-2026-task-<correoAbreviado>
+```
 
--   AWS OIDC (sin secrets)
--   IAM Role: rnez-role
--   Deploy solo desde main
+## 🧩 Flujo de despliegue
 
-------------------------------------------------------------------------
+### 1. Checkout repo
 
-## 📌 Flujo
+### 2. 🔐 AWS OIDC
 
-PR → tests + docker build → validación\
-main → build → docker → push ECR → deploy
+Autenticación sin secrets:
 
+```yaml
+role-to-assume: arn:aws:iam::822414985516:role/taller-deploy-aws-2026-rol-<correoAbreviado>
+```
 
+### 3. 📄 Obtener task definition actual
+
+```bash
+aws ecs describe-task-definition
+```
+
+### 4. 🧹 Limpiar JSON
+
+Se eliminan campos no válidos:
+
+* taskDefinitionArn
+* revision
+* status
+* requiresAttributes
+* compatibilities
+* registeredAt
+* registeredBy
+
+### 5. ✏️ Actualizar imagen Docker
+
+Se reemplaza la imagen por:
+
+```
+ACCOUNT_ID.dkr.ecr.AWS_REGION.amazonaws.com/ECR_REPOSITORY:latest
+```
+
+### 6. 🚀 Registrar nueva task definition
+
+```bash
+aws ecs register-task-definition
+```
+
+### 7. 🔄 Update ECS service
+
+```bash
+aws ecs update-service
+--force-new-deployment
+```
+
+---
+
+# 🐳 Dockerfile (Multistage)
+
+## 🏗️ Build stage
+
+```dockerfile
+FROM maven:3.9-eclipse-temurin-21 AS build
+WORKDIR /app
+COPY . .
+RUN mvn clean package -DskipTests
+```
+
+## 🚀 Runtime stage
+
+```dockerfile
+FROM eclipse-temurin:21-jre
+WORKDIR /app
+COPY --from=build /app/target/*.jar app.jar
+ENTRYPOINT ["java","-jar","app.jar"]
+```
+
+---
+
+# 🔐 Seguridad
+
+* AWS OIDC (sin secrets en GitHub)
+* IAM Role dedicado
+* Deploy controlado por rama `main`
+* ECS deployment con nueva task revision
+
+---
+
+# 📌 Flujo completo
+
+### Pull Request
+
+```
+PR → CI tests + Docker build → validación
+```
+
+### Main branch
+
+```
+Push → build → Docker → push ECR
+```
+
+### Deploy ECS
+
+```
+Manual → update task definition → new revision → deploy service
+```
+
+---
+
+# 📊 Resumen
+
+✔ CI automático en PRs
+✔ Build y push a ECR en main
+✔ Deploy controlado a ECS
+✔ OIDC sin secretos
+✔ Docker multistage optimizado
